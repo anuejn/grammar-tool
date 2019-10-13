@@ -1,0 +1,216 @@
+﻿<meta charset="utf-8">
+<title>grammar-tool</title>
+
+<link rel="stylesheet" href="https://typeof.net/Iosevka/iosevka/webfont.css">
+
+<style>
+    * {
+        box-sizing: border-box;
+        font-family: "Iosevka", sans-serif !important;
+    }
+    .tuple {
+        padding-left: 20px;
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .tuple * {
+        vertical-align: baseline;
+    }
+
+    input, textarea {
+        flex-basis: 90%;
+    }
+
+    label {
+        flex-basis: 6%;
+    }
+
+    section, h1{
+        padding: 20px 0;
+
+		max-width: 600px;
+		margin: 30px auto;
+    }
+
+	#out {
+		white-space: nowrap;
+		padding: 10px;
+		overflow: scroll;
+		width: fit-content;
+		margin: auto;
+		flex-wrap: wrap;
+	}
+
+	span {
+		flex-grow: 1;
+		padding: 5px;
+	}
+</style>
+
+<h1>grammar tool</h1>
+
+<section>
+    G = (
+    <div class="tuple">
+        <label for="v">V: </label>
+		<input type="text" id="v" value="S, A, B"><br>
+
+        <label for="t">T: </label>
+		<input type="text" id="t" value="0,1,2,3,4,5,6,7,8,9,0"><br>
+
+        <label for="p">P: </label>
+		<textarea rows="10" id="p" spellcheck="false">
+S -> 0 | A
+A -> 1B | 2B | 3B | 4B | 5B | 6B | 7B | 8B | 9B
+B -> 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 0 | {} | BB
+		</textarea><br>
+
+        <label for="s">S: </label>
+		<input type="text" id="s" value="S"><br>
+    </div>
+    )
+</section>
+<section>
+    <label for="len">max path length: </label><input type="number" id="len" value="2"><br>
+    <label for="pathprint">show path: </label><input type="checkbox" id="pathprint"><br>
+</section>
+<section>
+    <input type="button" id="start" value="wörter generieren!">
+</section>
+<div id="out"></div>
+
+<script>
+    document.getElementById("start").onclick = () => {
+        // input
+        const v = document.getElementById("v").value.split(",").map(x => x.trim());
+        const t = document.getElementById("t").value.split(",").map(x => x.trim());
+        const p = document.getElementById("p").value.trim().split("\n");
+        const s = document.getElementById("s").value.trim();
+
+        const len = parseInt(document.getElementById("len").value.trim());
+        const out = document.getElementById("out");
+
+        console.log("v", v);
+        console.log("t", t);
+        console.log("p", p);
+
+        // parse rules
+        let rules = [];
+        p.forEach(e => {
+            let [to_replace, replacements] = e.split("->").map(x => x.trim());
+            replacements.split("|").map(x => x.trim()).forEach(r => {
+                if (r === "") return;
+                if (r === "{}") r = "";
+                rules.push([to_replace, r])
+            });
+        });
+        console.log("rules", rules);
+
+        // sanitize input
+        if (v.indexOf(s) === -1) alert("the Starting Symbol needs to be a Non-Terminal");
+
+        const recursive_rules = rules.filter(r => r[0] === r[1]);
+        if (recursive_rules.length > 0) {
+            alert(`rule "${recursive_rules[0][0]} -> ${recursive_rules[0][1]}" leads to endless recursion`);
+            return;
+        }
+
+		const containsOther = (symbols, str) => {
+			let s_working_coppy = str;
+			function escapeRegExp(string) {
+				return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+			}
+			symbols.forEach(symbol => s_working_coppy = s_working_coppy.replace(new RegExp(escapeRegExp(symbol), "g"), ""));
+			return s_working_coppy;
+		};
+
+        const usesIllegalSymbols = s => containsOther([...v, ...t], s);
+        const undeclared_symbol_rules = rules.filter(r => usesIllegalSymbols(r[0] + r[1]));
+        if (undeclared_symbol_rules.length > 0) {
+            const [to_replace, replacement] = undeclared_symbol_rules[0];
+            alert(`rule "${to_replace} -> ${replacement}" uses symbol "${usesIllegalSymbols(to_replace + replacement)}" which is neither declared as Terminal nor as Non Terminal`);
+            return;
+        }
+
+
+        // really calculate
+        const get_replacements = (rule, input) => {
+            let [to_replace, replacement] = rule.map(v => v.split(""));
+
+            let variants = [];
+            input.split("").forEach((_, i) => {
+				if (to_replace.filter((check_letter, j) => check_letter === input[i+j]).length === to_replace.length) {
+					variants.push(
+							[...input.slice(0, i), ...replacement, ...input.slice(i+to_replace.length, input.length)].join("")
+					);
+				}
+            });
+
+			return variants;
+        };
+
+		/* the internal datastructure is as follows:
+			{
+			rule1: {
+				result1: {
+					rule1: {
+
+					}
+				},
+				result2: {
+
+				}
+			}
+		}
+		 */
+
+
+		let paths = [];
+        step = (path) => {
+        	console.log(path.length, len)
+			if(path.length-1 > len) {
+				return undefined;
+			}
+
+			let to_return = {};
+            rules.forEach(r => {
+            	let rule_results = {};
+                get_replacements(r, path[path.length-1][1]).forEach(variant => {
+					const new_path = [...path, [r, variant]];
+					rule_results[variant] = step(new_path);
+					if(!containsOther(t, variant)) {
+						paths.push(new_path)
+					}
+				});
+                if (Object.keys(rule_results).length > 0) {
+					to_return[`${r[0]}->${r[1]}`] = rule_results;
+				}
+            });
+			return to_return;
+        };
+
+        const bra = s => s === "" ? "{}" : s;
+
+        let result = step([[undefined, s]]);
+
+        // render the result
+		const path_strings = paths.map(path => path.map((v, i) => {
+			if (i === 0) { 
+				return v[1]
+			} else {
+				return ` ==(${bra(v[0][0])}->${bra(v[0][1])})==> <b>${bra(v[1])}</b>`
+			}
+		}).join(""));
+        if (document.getElementById("pathprint").checked) {
+
+			out.style.whiteSpace = "nowrap";
+			out.style.display = "block";
+			out.innerHTML = path_strings.join("<br>");
+		} else {
+        	out.style.whiteSpace = "normal";
+        	out.style.display = "flex";
+        	out.innerHTML = paths.map((path, i) => `<span title="${path_strings[i].replace(/<b>/g, "").replace(/<\/b>/g, "")}">${path[path.length - 1][1]}</span>`).join(" ")
+		}
+    }
+</script>
